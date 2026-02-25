@@ -65,7 +65,7 @@
 
 | 插件名称 | 必需性 | 作用 | 缺失影响 |
 | :--- | :--- | :--- | :--- |
-| **astrbot_plugin_life_scheduler<sup>url</sup> <sup>2</sup> [<sup>2</sup>](https://github.com/muyouzhi6/astrbot_plugin_life_scheduler)** | ⭐⭐⭐⭐⭐ | 提供虚拟生活、天气、穿搭 | 分享内容缺少生活细节，配图无法固定穿搭 |
+| **astrbot_plugin_life_scheduler<sup>url</sup> <sup>2</sup> [<sup>2</sup>](https://github.com/muyouzhi6/astrbot_plugin_life_scheduler)** | ⭐⭐⭐⭐⭐ | **提供虚拟生活、天气、穿搭** | 分享内容缺少生活细节，配图无法固定穿搭 |
 | **astrbot_plugin_gitee_aiimg<sup>url</sup> <sup>3</sup> [<sup>3</sup>](https://github.com/muyouzhi6/astrbot_plugin_gitee_aiimg)** | ⭐⭐⭐⭐⭐ | **提供生成图片及视频生成能力** | 无法发送配图，无法生成视频 |
 | **astrbot_plugin_qzone<sup>url</sup> <sup>4</sup> [<sup>4</sup>](https://github.com/Zhalslar/astrbot_plugin_qzone)** | ⭐⭐⭐⭐ | **提供分享QQ空间说说的能力** | 无法将分享内容、早报长图自动分享到QQ 空间 |
 | **astrbot_plugin_memos_integrator<sup>url</sup> <sup>5</sup> [<sup>5</sup>](https://github.com/zz6zz666/astrbot_plugin_memos_integrator)** | ⭐⭐⭐⭐ | **提供记忆存储与检索** | 无法引用历史话题，无法记录分享历史 |
