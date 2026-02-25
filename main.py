@@ -52,7 +52,7 @@ SOURCE_CN_MAP.update({
     "夸克": "quark"
 })
 
-@register("daily_sharing", "四次元未来", "定时主动分享所见所闻", "4.7.0")
+@register("daily_sharing", "四次元未来", "定时主动分享所见所闻", "4.7.1")
 class DailySharingPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -240,7 +240,8 @@ class DailySharingPlugin(Star):
         get_image: bool = True,
         need_image: bool = False,
         need_video: bool = False,
-        need_voice: bool = False
+        need_voice: bool = False,
+        to_qzone: bool = False
     ):
         """
         主动分享日常内容、新闻热搜、获取热搜图片等。
@@ -248,12 +249,13 @@ class DailySharingPlugin(Star):
         也支持获取"每天60s读世界"或"AI资讯快报"图片。
 
         Args:
-            share_type(string): 分享类型。支持：'问候', '新闻'(指互联网热搜), '心情', '知识', '推荐', '60s新闻'(指每日简报图), 'AI资讯'。
+            share_type(string): 分享类型。支持：'自动', '问候', '新闻', '心情', '知识', '推荐', '60s新闻', 'AI资讯'。当用户没有明确指出发什么类型的内容（比如只说“发个说说”、“分享一下”）时，请务必将其设为 '自动'。
             source(string): 仅当 share_type 为'新闻'时有效。指定新闻平台。支持：微博, 知乎, B站, 抖音, 头条, 百度, 腾讯, 小红书, 夸克。如果不指定则留空。
             get_image(boolean): 仅当 share_type 为'新闻'时有效。默认为 True (优先分享热搜长图)。只有当用户明确要求“文字版”、“文本”、“不要图片”或“写一段新闻”时，才将其设为 False。
             need_image(boolean): 是否需要AI为这段文案配图。默认为 False。仅当用户明确说“配图”、“带图”、“发张图”时，才将其设为 True。
             need_video(boolean): 是否需要AI为这段文案生成视频。默认为 False。仅当用户明确说“视频”、“动态图”、“动起来”时，才将其设为 True。
             need_voice(boolean): 是否需要将文案转为语音(TTS)分享。默认为 False。仅当用户明确提到“语音”、“朗读”、“念给我听”时，设为 True。
+            to_qzone(boolean): 是否需要将内容作为说说分享到QQ空间。默认为 False。仅当用户明确要求“发说说”、“发空间”、“分享到空间”时，必须设为 True。
         """
         if self._is_terminated: return ""
 
@@ -265,7 +267,7 @@ class DailySharingPlugin(Star):
         # 2. 启动后台异步任务
         task = asyncio.create_task(
             self._async_daily_share_task(
-                event, share_type, source, get_image, need_image, need_video, need_voice
+                event, share_type, source, get_image, need_image, need_video, need_voice, to_qzone
             )
         )
         self._bg_tasks.add(task)
@@ -282,7 +284,8 @@ class DailySharingPlugin(Star):
         get_image: bool,
         need_image: bool,
         need_video: bool,
-        need_voice: bool
+        need_voice: bool,
+        to_qzone: bool
     ):
         """实际执行分享逻辑的后台任务 (LLM 触发)"""
         try:
@@ -292,36 +295,67 @@ class DailySharingPlugin(Star):
             # 60s新闻
             if any(k in st_clean for k in ["60s", "六十秒", "读世界"]):
                 url = self.news_service.get_60s_image_url()
-                if url:
-                    await event.send(event.image_result(url))
-                else:
+                if not url:
                     await event.send(event.plain_result("获取60s新闻失败，请检查API Key配置。"))
+                    return 
+                    
+                if to_qzone:
+                    qzone_plugin = self.ctx_service._find_plugin("qzone")
+                    if qzone_plugin and hasattr(qzone_plugin, "service"):
+                        self._inject_qzone_client(qzone_plugin)
+                        try:
+                            await qzone_plugin.service.publish_post(text="【每天60秒读懂世界】", images=[url])
+                            await event.send(event.plain_result("每天60s读世界已成功分享到QQ空间！"))
+                            await self.db.add_sent_history("qzone_broadcast", "news", "【每天60秒读懂世界】(LLM)", True)
+                        except Exception as e:
+                            await event.send(event.plain_result(f"QQ空间分享失败: {e}"))
+                    else:
+                        await event.send(event.plain_result("未检测到QQ空间插件！"))
+                else:
+                    await event.send(event.image_result(url))
                 return 
 
             # AI资讯
             if any(k in st_clean for k in ["ai资讯", "ai新闻", "ai日报"]) or st_clean == "ai":
                 url = self.news_service.get_ai_news_image_url()
-                if url:
-                    await event.send(event.image_result(url))
-                else:
+                if not url:
                     await event.send(event.plain_result("获取AI资讯失败，请检查API Key配置。"))
+                    return 
+                    
+                if to_qzone:
+                    qzone_plugin = self.ctx_service._find_plugin("qzone")
+                    if qzone_plugin and hasattr(qzone_plugin, "service"):
+                        self._inject_qzone_client(qzone_plugin)
+                        try:
+                            await qzone_plugin.service.publish_post(text="【AI资讯快报】", images=[url])
+                            await event.send(event.plain_result("AI资讯快报已成功分享到QQ空间！"))
+                            await self.db.add_sent_history("qzone_broadcast", "news", "【AI资讯快报】(LLM)", True)
+                        except Exception as e:
+                            await event.send(event.plain_result(f"QQ空间分享失败: {e}"))
+                    else:
+                        await event.send(event.plain_result("未检测到QQ空间插件！"))
+                else:
+                    await event.send(event.image_result(url))
                 return 
 
             # === 常规流程 ===
             # 参数清洗与映射
             target_type_enum = None
             
-            # 映射分享类型 (中文 -> 枚举)
-            if share_type in CMD_CN_MAP:
-                target_type_enum = CMD_CN_MAP[share_type]
+            if share_type == "自动" or share_type == "auto":
+                target_type_enum = None  
             else:
-                # 模糊匹配尝试
-                for k, v in CMD_CN_MAP.items():
-                    if k in share_type:
-                        target_type_enum = v
-                        break
+                # 映射分享类型 (中文 -> 枚举)
+                if share_type in CMD_CN_MAP:
+                    target_type_enum = CMD_CN_MAP[share_type]
+                else:
+                    # 模糊匹配尝试
+                    for k, v in CMD_CN_MAP.items():
+                        if k in share_type:
+                            target_type_enum = v
+                            break
                 if not target_type_enum:
-                    await event.send(event.plain_result(f"不支持的分享类型：{share_type}。支持：问候, 新闻, 心情, 知识, 推荐, 60s新闻, AI资讯。"))
+                    await event.send(event.plain_result(f"不支持的分享类型：{share_type}。支持：自动, 问候, 新闻, 心情, 知识, 推荐, 60s新闻, AI资讯。"))
                     return
 
             # 映射新闻源 (中文 -> key)
@@ -349,22 +383,41 @@ class DailySharingPlugin(Star):
             if is_news and get_image and not need_image and not need_voice and not need_video:
                 try:
                     img_url = None
+                    src_name = ""
                     # 优先使用指定的源热搜
                     if news_src_key:
-                        img_url, _ = self.news_service.get_hot_news_image_url(news_src_key)
+                        img_url, src_name = self.news_service.get_hot_news_image_url(news_src_key)
                     else:
                         # 如果没有指定，则随机选择一个已启用的新闻源发送
                         random_src = self.news_service.select_news_source()
-                        img_url, _ = self.news_service.get_hot_news_image_url(random_src)
+                        img_url, src_name = self.news_service.get_hot_news_image_url(random_src)
 
                     if img_url:
-                        await event.send(event.image_result(img_url))
+                        if to_qzone:
+                            qzone_plugin = self.ctx_service._find_plugin("qzone")
+                            if qzone_plugin and hasattr(qzone_plugin, "service"):
+                                self._inject_qzone_client(qzone_plugin)
+                                try:
+                                    await qzone_plugin.service.publish_post(text=f"【{src_name}】", images=[img_url])
+                                    await event.send(event.plain_result(f"[{src_name}] 图片已成功分享到QQ空间！"))
+                                    await self.db.add_sent_history("qzone_broadcast", "news", f"【{src_name}】长图(LLM)", True)
+                                except Exception as e:
+                                    await event.send(event.plain_result(f"QQ空间分享失败: {e}"))
+                            else:
+                                await event.send(event.plain_result("未检测到QQ空间插件！"))
+                        else:
+                            await event.send(event.image_result(img_url))
                     else:
                         await event.send(event.plain_result("获取新闻图片失败。"))
                 except Exception as e:
-                    logger.error(f"[DailySharing] 获取默认随机新闻图片失败: {e}")
+                    logger.error(f"[DailySharing] 获取新闻图片失败: {e}")
                     await event.send(event.plain_result(f"获取新闻图片失败。"))
                 
+                return
+
+            # 如果用户要求发QQ空间文案说说
+            if to_qzone:
+                await self._execute_qzone_share(force_type=target_type_enum, news_source=news_src_key)
                 return
 
             # 场景 B: 标准 LLM 生成流程
