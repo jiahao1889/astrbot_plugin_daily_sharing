@@ -253,6 +253,7 @@ class ContentService:
     async def _gen_greeting(self, period: TimePeriod, ctx: dict):
         p_label = ctx['period_label']
         is_group = ctx['is_group']
+        is_qzone = ctx.get('target_id') == 'qzone_broadcast'
         call_name = ctx.get('nickname', '')
         detect_name = ctx.get('detect_name', '')
         
@@ -263,7 +264,9 @@ class ContentService:
         address_rule = ""
         user_info_prompt = ""
 
-        if is_group:
+        if is_qzone:
+            address_rule = "【重要：QQ空间动态】这是你的个人主页说说。不需要@任何人，不需要打招呼，自然抒发当下的感受即可。"
+        elif is_group:
             address_rule = "面向群友，自然使用'大家'或不加称呼。"
         else:
             address_rule = "【重要】这是一对一私聊，严禁使用'大家'、'你们'。请使用'你'或直接说内容。"
@@ -308,9 +311,11 @@ class ContentService:
         if ctx.get('recent_dynamics'):
             dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
 
+        target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
+
         prompt = f"""
 【当前时间】{ctx['date_str']} {ctx['time_str']} ({p_label})
-你现在要向{'群聊' if is_group else '私聊'}发送一条温馨自然的问候。
+你现在要向{target_str}发送一条温馨自然的问候。
 
 {user_info_prompt}
 {ctx['life_hint']}
@@ -348,6 +353,7 @@ class ContentService:
 
     async def _gen_mood(self, period, ctx):
         is_group = ctx['is_group']
+        is_qzone = ctx.get('target_id') == 'qzone_broadcast'
         call_name = ctx.get('nickname', '')
         detect_name = ctx.get('detect_name', '')
 
@@ -358,7 +364,9 @@ class ContentService:
         address_rule = ""
         user_info_prompt = ""
 
-        if not is_group:
+        if is_qzone:
+            address_rule = "\n【重要：QQ空间动态】这是一条个人社交平台的动态/日记。绝对禁止对别人说话，严禁出现“你”、“大家”等任何称呼，纯粹的自言自语。"
+        elif not is_group:
             address_rule = "\n【重要：私聊模式】严禁使用'大家'、'你们'。请把你当做在和单个朋友聊天。"
             user_info_prompt = self._build_user_prompt(call_name, detect_name)
 
@@ -376,7 +384,9 @@ class ContentService:
 
         # 3. 共鸣策略
         resonance_guide = ""
-        if is_group:
+        if is_qzone:
+            resonance_guide = "【QQ空间日记策略】无需顾及听众，无需互动提问，只专注描绘你周遭的光影、细微的动作和个人的思绪沉淀。"
+        elif is_group:
             resonance_guide = f"""
 【群聊共鸣策略 - 日程中的"治愈微光"】
 请拒绝机械的时间报时（如"早上了"、"晚上了"），而是捕捉你当前生活状态中那些微小但能抚慰人心的瞬间。
@@ -407,9 +417,11 @@ class ContentService:
         if ctx.get('recent_dynamics'):
             dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
 
+        target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
+
         prompt = f"""
 【当前时间】{ctx['date_str']} {ctx['time_str']} ({ctx['period_label']})
-你想和{'群聊' if is_group else '私聊'}分享一下现在的心情或想法。
+你想和{target_str}分享一下现在的心情或想法。
 
 {user_info_prompt}
 {ctx['life_hint']}
@@ -446,6 +458,7 @@ class ContentService:
             return None
 
         is_group = ctx['is_group']
+        is_qzone = ctx.get('target_id') == 'qzone_broadcast'
         call_name = ctx.get('nickname', '')
         detect_name = ctx.get('detect_name', '')
 
@@ -490,7 +503,9 @@ class ContentService:
         # 称呼控制
         address_rule = ""
         user_info_prompt = ""
-        if not is_group:
+        if is_qzone:
+            address_rule = "【重要：QQ空间动态】不需要和任何人对话，纯粹记录自己看到新闻后的感慨即可。"
+        elif not is_group:
             address_rule = "【私聊模式】不要说'大家'、'你们'。请假装只分享给你对面这一个人看。"
             user_info_prompt = self._build_user_prompt(call_name, detect_name)
 
@@ -513,9 +528,11 @@ class ContentService:
         if ctx.get('recent_dynamics'):
             dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
 
+        target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
+
         prompt = f"""
 【当前时间】{ctx['date_str']} {ctx['time_str']} ({ctx['period_label']})
-你看到了今天的{source_name}，想选择{share_count}条和{'群聊' if is_group else '私聊'}分享。
+你看到了今天的{source_name}，想选择{share_count}条和{target_str}分享。
 
 {user_info_prompt}
 {ctx['life_hint']}
@@ -569,6 +586,7 @@ class ContentService:
             return None
 
         is_group = ctx['is_group']
+        is_qzone = ctx.get('target_id') == 'qzone_broadcast'
         call_name = ctx.get('nickname', '')
         detect_name = ctx.get('detect_name', '')
 
@@ -604,7 +622,9 @@ class ContentService:
         address_rule = ""
         user_info_prompt = ""
 
-        if is_group:
+        if is_qzone:
+            address_rule = "【重要：QQ空间动态】这是你的个人动态，直接分享知识即可，绝对不要向别人提问，不要出现“你知道吗”、“大家知道吗”这样的互动词汇。"
+        elif is_group:
             address_rule = "面向群友，可以使用'大家'、'你们'。"
         else:
             address_rule = "【重要：私聊模式】严禁使用'大家'、'你们'、'各位'。必须把你当做在和单个朋友聊天，使用'你'（例如：'你知道吗...'）。"
@@ -631,9 +651,11 @@ class ContentService:
         if ctx.get('recent_dynamics'):
             dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
 
+        target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
+
         prompt = f"""
 【当前时间】{ctx['date_str']} {ctx['time_str']} ({ctx['period_label']})
-你现在的任务是：向{'群聊' if is_group else '私聊'}分享下面的冷知识。
+你现在的任务是：向{target_str}分享下面的冷知识。
 
 【核心任务】
 1. 知识点关键词：【{target_keyword}】
@@ -696,6 +718,7 @@ class ContentService:
             return None
 
         is_group = ctx['is_group']
+        is_qzone = ctx.get('target_id') == 'qzone_broadcast'
         call_name = ctx.get('nickname', '')
         detect_name = ctx.get('detect_name', '')
 
@@ -733,7 +756,9 @@ class ContentService:
         # 3. 称呼控制
         address_rule = ""
         user_info_prompt = ""
-        if is_group:
+        if is_qzone:
+             address_rule = "【重要：QQ空间动态】这是你的个人日常记录。纯粹表达你自己对这个作品的喜爱，绝对不要向别人安利，不要说“推荐给你们”、“推荐你看”之类的话。"
+        elif is_group:
              address_rule = "面向群友，推荐给'大家'。"
         else:
              address_rule = "【重要：私聊模式】严禁使用'大家'、'你们'。必须把对方当做唯一听众，使用'你'（例如：'推荐你看...'，'你一定会喜欢...'）。"
@@ -762,9 +787,11 @@ class ContentService:
         if ctx.get('recent_dynamics'):
             dynamics_prompt = f"\n【你最近发过的动态回顾】\n{ctx['recent_dynamics']}\n(注：请保持人设连贯，可以偶尔自然呼应之前的心情，但绝对不要重复发过的内容)"
 
+        target_str = "QQ空间" if is_qzone else ('群聊' if is_group else '私聊')
+
         prompt = f"""
 【当前时间】{ctx['date_str']} {ctx['time_str']} ({ctx['period_label']})
-你现在的任务是：向{'群聊' if is_group else '私聊'}推荐【{target_work}】。
+你现在的任务是：向{target_str}推荐【{target_work}】。
 
 【核心指令】
 1. 必须基于下面的资料进行推荐，不要更换目标。
@@ -812,3 +839,4 @@ class ContentService:
             except: pass
             return f"推荐类型: {rec_type} - {sub_style}\n\n{res}"
         return None
+        

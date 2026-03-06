@@ -69,21 +69,21 @@ class ImageService:
         # 1. 基础时间光影库 
         if period == TimePeriod.DAWN: 
             if curr_hour < 4:
-                time_hint = "凌晨的寂静氛围，漆黑的天空，路灯或城市灯光，孤独感，电影感冷色"
+                time_hint = "凌晨深夜的寂静，漆黑的夜空，漆黑的夜色，路灯或城市灯光"
             else:
-                time_hint = "黎明前的微光，天空呈现深蓝色，微弱的冷光，清冷寂静，朦胧感"        
+                time_hint = "黎明前的微光，天空是非常深的暗蓝色，微弱的冷光，清冷寂静，朦胧感"        
         elif period == TimePeriod.MORNING: 
             time_hint = "早晨的日出晨光, 柔和的朝阳, 清晨柔和的漫射光，丁达尔效应, 梦幻光影"
         elif period == TimePeriod.FORENOON:
-            time_hint = "上午的明亮日光，通透，晴朗的天空, 充满活力"
+            time_hint = "上午的明亮日光，通透，晴朗的天空, 充满活力的光线"
         elif period == TimePeriod.AFTERNOON:
-            time_hint = "下午的充足阳光，光影清晰，慵懒或明亮, 清晰的照明"
+            time_hint = "下午的充足阳光，光影对比清晰，慵懒或明亮的氛围, 清晰的照明"
         elif period == TimePeriod.EVENING: 
-            time_hint = "傍晚的暖色调，温暖的金色光线, 夕阳、晚霞或暮色，柔和的长阴影"
+            time_hint = "傍晚的暖色调，温暖的金色夕阳, 晚霞或暮色，柔和的长阴影，逆光轮廓"
         elif period == TimePeriod.NIGHT: 
-            time_hint = "夜晚的灯光氛围，丰富的城市霓虹灯光, 温馨的室内暖光"
-        else: # LATE_NIGHT
-            time_hint = "深夜的幽暗氛围，昏暗的光线，电影感布光，宁静的氛围, 局部点光"
+            time_hint = "夜晚的漆黑天空, 深沉的夜景，城市霓虹灯光, 室内温馨的人造暖光"
+        else: 
+            time_hint = "深夜的幽暗氛围，漆黑的环境，城市夜景，昏暗的室内人造光，宁静的氛围"
 
         # 2. 穿搭提示
         outfit_hint = "当前是休息时间，忽略白天外出服装，仅提取睡衣或家居服。" if is_night else "当前是活动时间，提取完整的外出日常穿搭。"
@@ -122,7 +122,7 @@ class ImageService:
 【提取要求】
 1. **主体 (subject)**：【最重要】画面的核心物体描述（例如：精致的荷花酥，一杯牛奶或者一本封皮复古的书）。如果是纯风景或画人，此项填“无”。
 2. **环境 (environment)**：根据逻辑确定的具体地点。
-3. **光影 (lighting)**：参考时间段[{time_hint}]。如果是室内，强调人造光或窗外透进的光；如果是室外，强调自然天气氛围。
+3. **光影 (lighting)**：参考时间段[{time_hint}]。如果是室内，强调人造光；如果是室外，强调自然天气氛围。
 4. **穿搭 (outfit)**：{outfit_hint} 请明确区分"内搭"和"外穿"层次。
 5. **动作 (action)**：人物动作。
 
@@ -130,9 +130,9 @@ class ImageService:
 {{
     "subject": "...",      // 主体 (例如: 粉色荷花酥)
     "environment": "...",  // 环境 (例如: 苏州河畔的野餐垫上)
-    "lighting": "...",     // 光影 (例如：昏黄的室内灯光，配合窗外的阴雨冷光)
+    "lighting": "...",     // 光影 (例如：昏黄的室内灯光)
     "outfit": "...",       // 穿搭 (例如：白色棒球服外套，内搭黑色高领毛衣)
-    "action": "...",       // 动作 (例如：双手捧着热咖啡，看着窗外)
+    "action": "...",       // 动作 (例如：双手捧着热咖啡)
     "weather_vibe": "..."  // 例如：玻璃上有水雾，朦胧感
 }}
 """
@@ -221,7 +221,7 @@ class ImageService:
         is_text_priority = self.img_conf.get("priority_text_over_schedule", True)
         logic_str = "文案主导" if is_text_priority else "日程主导"        
 
-        # 2. 检测是否启用 Gitee 自拍参考图逻辑 (NEW)
+        # 2. 检测是否启用 Gitee 自拍参考图逻辑
         use_gitee_ref = self.img_conf.get("use_gitee_selfie_ref", False)
         is_selfie_mode = involves_self and use_gitee_ref
         
@@ -261,7 +261,7 @@ class ImageService:
         comp_desc = "" 
         
         # 定义质量词
-        quality_tags = "8K分辨率, 高质量, 杰作, 高分辨率, 细节丰富, 色彩鲜艳, 电影级光影效果"
+        quality_tags = "8K分辨率, 高质量, 写实, 高分辨率, 细节丰富, 色彩鲜艳, 电影级光影效果"
 
         # --- 1. 主体与构图 ---
         if involves_self:
