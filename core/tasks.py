@@ -1070,10 +1070,9 @@ class TaskManager:
             qzone_life_prompt = self.ctx_service.format_life_context(life_ctx, stype, False, None)
             qzone_life_prompt += (
                 "\n\n【最高优先级覆盖指令】\n"
-                "请你完全无视系统提示中关于“一对一私聊”、“对单个朋友聊天”、“使用你”等所有设定！\n"
                 "这是一条个人QQ空间社交平台的动态说说\n"
                 "当前任务是以纯粹的【个人日记或心情独白】的口吻来写。\n"
-                "1. 绝对禁止对别人说话，严禁出现“你”、“你们”、“大家”等称呼。\n"
+                "1. 请以你的人设性格说话，真实自然\n"
                 "2. 只能专注描绘自己的状态，就像自己在自言自语一样。"
             )
             
