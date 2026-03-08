@@ -567,7 +567,7 @@ class TaskManager:
             if any(k in st_clean for k in ["ai资讯", "ai新闻", "ai日报"]) or st_clean == "ai":
                 ai_data = await self.news_service.get_ai_news_json()
                 if not ai_data:
-                    await event.send(event.plain_result("获取AI资讯失败或今日暂无更新。"))
+                    await event.send(event.plain_result("获取AI资讯失败，今日暂无更新。"))
                     return 
 
                 url = self.news_service.get_ai_news_image_url()
@@ -810,7 +810,7 @@ class TaskManager:
                 url = self.news_service.get_ai_news_image_url()
                 if url: images_to_send.append(("AI资讯", url))
             else:
-                logger.info("[DailySharing] 今日无AI资讯数据或获取失败，跳过推送图片")
+                logger.info("[DailySharing] 获取AI资讯失败，今日暂无更新，跳过推送图片")
 
         if not images_to_send:
             logger.warning("[DailySharing] 早报任务触发，发现没有开启的早报发送或获取图片失败")

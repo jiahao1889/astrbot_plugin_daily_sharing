@@ -323,16 +323,50 @@ class ContextService:
             outfit = data.get("outfit", "")
             if outfit: parts.append(f"【今日穿搭】{outfit}")
             
-            # 3. 风格与心情
+            # 3. 完整元数据 (Meta)
             meta = data.get("meta", {})
+            theme = meta.get("theme", "")
             mood = meta.get("mood", "")
             style = meta.get("style", "")
-            if mood or style:
-                parts.append(f"【今日风格】心情{mood}，走{style}")
+            schedule_type = meta.get("schedule_type", "")
+            
+            meta_str = []
+            if theme: meta_str.append(f"主题: {theme}")
+            if mood: meta_str.append(f"心情: {mood}")
+            if style: meta_str.append(f"风格: {style}")
+            if schedule_type: meta_str.append(f"定位: {schedule_type}")
+            if meta_str:
+                parts.append(f"【今日基调】{' | '.join(meta_str)}")
                 
-            # 4. 日程详情
+            # 4. 提取当前活动
+            timeline = data.get("timeline", [])
+            if timeline:
+                import datetime
+                now = datetime.datetime.now()
+                now_mins = now.hour * 60 + now.minute
+                current_act = None
+                for item in timeline:
+                    try:
+                        h, m = map(int, item.get("time", "00:00").split(':'))
+                        if h * 60 + m <= now_mins:
+                            current_act = item
+                    except:
+                        pass
+                if current_act:
+                    parts.append(f"【当前活动】{current_act.get('activity')} (状态: {current_act.get('status', '未知')})")
+
+            # 5. 提取备忘录和长期记忆
+            memo = data.get("memo", "")
+            if memo: 
+                parts.append(f"【今日备忘录】\n{memo}")
+                
+            memories = data.get("long_term_memory", [])
+            if memories:
+                parts.append(f"【你的近期记忆 (可用于丰富话题)】\n" + "\n".join(f"- {m}" for m in memories))
+
+            # 6. 日程详情及完整时间轴
             schedule = data.get("schedule", "")
-            if schedule: parts.append(f"【今日日程与状态】\n{schedule}")
+            if schedule: parts.append(f"【今日完整时间轴及计划】\n{schedule}")
             
             return "\n\n".join(parts)
         except Exception as e:
@@ -361,39 +395,43 @@ class ContextService:
 
         if allow_detail:
             # 如果允许细节，直接返回完整上下文
-            return f"\n\n【你的当前状态】\n{context}\n(注意：这是群聊，你可以提及上述状态，但请保持自然，不要像汇报工作一样)\n"
+            return f"\n\n【你的当前状态与记忆】\n{context}\n(注意：这是群聊，你可以提及上述状态，但请保持自然，不要像汇报工作一样)\n"
 
         # --- 以下为默认隐私模式（脱敏） ---
 
         # 解析上下文中的关键信息
         lines = context.split('\n')
-        weather, period, busy = None, None, False
+        weather, period, busy, curr_act, mood_str = None, None, False, None, None
         for line in lines:
             if '天气' in line or '温度' in line: weather = line.strip()
             elif '时段' in line: period = line.strip()
+            elif '今日基调' in line: mood_str = line.strip()
             elif '今日计划' in line: busy = True 
+            elif '【当前活动】' in line: curr_act = line.strip()
         
         # 构建状态描述列表
         status_parts = []
         if weather: status_parts.append(weather)
+        if mood_str: status_parts.append(mood_str)
         if period: status_parts.append(period) 
-        if busy: status_parts.append("（今日状态：比较忙碌）")
+        if curr_act: status_parts.append(curr_act)
+        elif busy: status_parts.append("（今日状态：比较忙碌）")
         
         full_status = "\n".join(status_parts) if status_parts else "未知"
         
         # === 针对不同类型的 Prompt ===
         
         if sharing_type == SharingType.GREETING:
-            return f"\n\n【你的状态】\n{full_status}\n结合天气、时段(早/晚)和忙闲状态，自然地向大家打招呼\n"
+            return f"\n\n【你的状态】\n{full_status}\n结合天气、时段(早/晚)和状态，自然地向大家打招呼\n"
             
         elif sharing_type == SharingType.NEWS:
-            return f"\n\n【当前场景】\n{full_status}\n结合你当前的状态(如忙碌/休闲/天气)自然地分享新闻\n"
+            return f"\n\n【当前场景】\n{full_status}\n结合你当前的状态(如所处环境/休闲/天气)自然地分享新闻\n"
             
         elif sharing_type in (SharingType.KNOWLEDGE, SharingType.RECOMMENDATION):
-            return f"\n\n【当前场景】\n{full_status}\n结合你当前的状态(如工作中/休息中)来切入分享\n"
+            return f"\n\n【当前场景】\n{full_status}\n结合你当前的状态来切入分享\n"
 
         elif sharing_type == SharingType.MOOD:
-            return f"\n\n【你的状态】\n{full_status}\n可以简单分享心情（结合天气或忙闲），但不要过于私人\n"
+            return f"\n\n【你的状态】\n{full_status}\n可以简单分享心情（结合天气或当前活动），但不要过于私人\n"
             
         return ""
 
@@ -826,3 +864,4 @@ class ContextService:
                 logger.info(f"[上下文] 已记录到 Memos: {target_umo}")
             except Exception as e: 
                 logger.warning(f"[上下文] 记录失败: {e}")
+                

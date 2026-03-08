@@ -364,11 +364,19 @@ class NewsService:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, timeout=10) as resp:
                     if resp.status == 200:
-                        return await resp.json(content_type=None)
+                        data = await resp.json(content_type=None)
+                        
+                        if data and isinstance(data, dict):
+                            if "news" in data and not data.get("news"):
+                                return None
+                                
+                            if "code" in data and str(data.get("code")) not in ["200", "1"]:
+                                return None
+                        
+                        return data
             return None
         except Exception as e:
-            logger.warning(f"[新闻] 获取AI资讯数据失败: {e}")
-            return None            
+            return None           
 
     def get_60s_image_url(self) -> Optional[str]:
         """获取每日60s读世界图片URL"""
