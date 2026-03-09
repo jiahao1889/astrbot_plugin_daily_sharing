@@ -37,6 +37,9 @@ class TaskManager:
             cron = self.basic_conf.get("sharing_cron", "0 8,20 * * *")
             self.setup_cron(cron)
             logger.debug(f"[DailySharing] 分享内容定时任务已启动 ({cron})")
+            
+            # 扫描并注册所有带独立时间的专属定时任务
+            self.setup_custom_target_crons()
         else:
             logger.debug("[DailySharing] 分享内容已禁用")
 
@@ -55,6 +58,100 @@ class TaskManager:
         # 启动时恢复因为重启而中断的延迟任务
         asyncio.create_task(self._recover_pending_jobs())
 
+    def setup_custom_target_crons(self):
+        """解析并为写了专属时间的群/私聊挂载独立闹钟 (支持随机延迟)"""
+        default_adapter_id = self.plugin._cached_adapter_id
+        if not default_adapter_id:
+            try:
+                if hasattr(self.plugin.context, "platform_manager"):
+                    insts = self.plugin.context.platform_manager.get_insts()
+                    for inst in insts:
+                        if hasattr(inst, "metadata") and inst.metadata.id:
+                            default_adapter_id = inst.metadata.id
+                            self.plugin._cached_adapter_id = default_adapter_id
+                            break
+            except Exception: pass
+        if not default_adapter_id:
+            default_adapter_id = "aiocqhttp"
+
+        r_groups = self._parse_targets_config(self.receiver_conf.get("groups", []))
+        r_users = self._parse_targets_config(self.receiver_conf.get("users", []))
+
+        # 清除旧的 custom_share 任务
+        job_ids = [job.id for job in self.scheduler.get_jobs() if job.id.startswith("custom_share_")]
+        for jid in job_ids:
+            self.scheduler.remove_job(jid)
+
+        def add_custom_job(target_id, is_group, cron_str):
+            job_id = f"custom_share_{target_id}"
+            target_umo = f"{default_adapter_id}:{'GroupMessage' if is_group else 'FriendMessage'}:{target_id}"
+            
+            async def delayed_custom_execute():
+                if self.plugin._is_terminated: return
+                task = asyncio.current_task()
+                self.plugin._bg_tasks.add(task)
+                try:
+                    await self.db.update_state_dict(f"target_{target_id}", {"pending_delay_job": None})
+                    if self._lock.locked():
+                        logger.warning(f"[DailySharing] 独立任务 {target_id} 触发，系统繁忙排队中...")
+                    async with self._lock:
+                        logger.debug(f"[DailySharing] 专属时间到达，开始执行独立分享任务: {target_id}")
+                        await self.execute_share(specific_target=target_umo)
+                finally:
+                    self.plugin._bg_tasks.discard(task)
+
+            async def custom_wrapper():
+                if self.plugin._is_terminated: return
+                
+                # 独立群聊、私聊配置本身就是Cron触发，强制读取随机延迟配置
+                random_delay_min = 0
+                try:
+                    random_delay_min = int(self.basic_conf.get("cron_random_delay", 0))
+                except Exception: 
+                    pass
+
+                if random_delay_min > 0:
+                    delay_seconds = random.randint(0, random_delay_min * 60)
+                    if delay_seconds > 0:
+                        target_time = datetime.now() + timedelta(seconds=delay_seconds)
+                        time_str = target_time.strftime('%H:%M:%S')
+                        
+                        await self.db.update_state_dict(f"target_{target_id}", {
+                            "pending_delay_job": {"target_time": target_time.timestamp()}
+                        })
+                        
+                        self.scheduler.add_job(
+                            delayed_custom_execute, 'date',
+                            run_date=target_time,
+                            id=f"delayed_custom_share_{target_id}",
+                            replace_existing=True
+                        )
+                        logger.debug(f"[DailySharing] 独立任务 [{target_id}] 已触发，将随机延迟 {delay_seconds/60:.1f} 分钟，预计于 {time_str} 执行...")
+                        return
+                
+                # 如果没配置延迟或延迟为0，立刻执行
+                await delayed_custom_execute()
+
+            actual_cron = CRON_TEMPLATES.get(cron_str, cron_str)
+            parts = actual_cron.split()
+            if len(parts) == 5:
+                self.scheduler.add_job(
+                    custom_wrapper, 'cron',
+                    minute=parts[0], hour=parts[1], day=parts[2], month=parts[3], day_of_week=parts[4],
+                    id=job_id, replace_existing=True, max_instances=1
+                )
+                logger.debug(f"[DailySharing] 独立群/私聊任务 [{target_id}] 已挂载专属闹钟: {actual_cron}")
+            else:
+                logger.error(f"[DailySharing] 独立群/私聊任务 [{target_id}] 无效的Cron表达式: {cron_str}")
+
+        for gid, conf in r_groups.items():
+            if isinstance(conf, dict) and conf.get("cron"):
+                add_custom_job(gid, True, conf["cron"])
+                
+        for uid, conf in r_users.items():
+            if isinstance(conf, dict) and conf.get("cron"):
+                add_custom_job(uid, False, conf["cron"])
+
     async def _recover_pending_jobs(self):
         """恢复因重启中断的延迟任务"""
         if self.plugin._is_terminated: return
@@ -62,7 +159,7 @@ class TaskManager:
         now = datetime.now()
         now_ts = now.timestamp()
         
-        # 1. 主任务恢复
+        # 主任务恢复
         global_state = await self.db.get_state("global", {})
         pending = global_state.get("pending_delay_job")
         if pending:
@@ -73,7 +170,7 @@ class TaskManager:
                     self._execute_delayed_task, 'date', run_date=run_time, id="resume_auto_share", replace_existing=True
                 )
                 logger.debug(f"[DailySharing] 已恢复未完成的延迟分享任务，将在 {run_time.strftime('%H:%M:%S')} 执行")
-            elif 0 <= now_ts - target_ts < 3600:  # 错过不超过1小时，立刻补偿执行
+            elif 0 <= now_ts - target_ts < 3600:  
                 run_time = now + timedelta(seconds=5)
                 self.scheduler.add_job(
                     self._execute_delayed_task, 'date', run_date=run_time, id="resume_auto_share", replace_existing=True
@@ -82,7 +179,7 @@ class TaskManager:
             else:
                 await self.db.update_state_dict("global", {"pending_delay_job": None})
 
-        # 2. QQ空间任务恢复
+        # QQ空间任务恢复
         qzone_state = await self.db.get_state("qzone", {})
         q_pending = qzone_state.get("pending_delay_job")
         if q_pending:
@@ -101,6 +198,52 @@ class TaskManager:
                 logger.debug("[DailySharing] 检测到近期错过的QQ空间延迟任务，即将执行补偿分享")
             else:
                 await self.db.update_state_dict("qzone", {"pending_delay_job": None})
+
+        # 独立群聊、私聊专属任务的延迟恢复
+        default_adapter_id = self.plugin._cached_adapter_id
+        if not default_adapter_id:
+            try:
+                if hasattr(self.plugin.context, "platform_manager"):
+                    for inst in self.plugin.context.platform_manager.get_insts():
+                        if hasattr(inst, "metadata") and inst.metadata.id:
+                            default_adapter_id = inst.metadata.id
+                            break
+            except Exception: pass
+        if not default_adapter_id: default_adapter_id = "aiocqhttp"
+
+        r_groups = self._parse_targets_config(self.receiver_conf.get("groups", []))
+        r_users = self._parse_targets_config(self.receiver_conf.get("users", []))
+        all_targets = [(gid, True) for gid in r_groups.keys() if gid] + [(uid, False) for uid in r_users.keys() if uid]
+        
+        def recover_custom_job(tid, is_group):
+            target_umo = f"{default_adapter_id}:{'GroupMessage' if is_group else 'FriendMessage'}:{tid}"
+            async def delayed_recover():
+                if self.plugin._is_terminated: return
+                await self.db.update_state_dict(f"target_{tid}", {"pending_delay_job": None})
+                async with self._lock:
+                    logger.info(f"[DailySharing] ⏰ 补偿恢复，执行独立分享任务: {tid}")
+                    await self.execute_share(specific_target=target_umo)
+            return delayed_recover
+
+        for tid, is_group in all_targets:
+            t_state = await self.db.get_state(f"target_{tid}", {})
+            t_pending = t_state.get("pending_delay_job")
+            if t_pending:
+                target_ts = t_pending.get("target_time", 0)
+                if target_ts > now_ts:
+                    run_time = datetime.fromtimestamp(target_ts)
+                    self.scheduler.add_job(
+                        recover_custom_job(tid, is_group), 'date', run_date=run_time, 
+                        id=f"resume_custom_share_{tid}", replace_existing=True
+                    )
+                elif 0 <= now_ts - target_ts < 3600:
+                    run_time = now + timedelta(seconds=random.randint(10, 30))
+                    self.scheduler.add_job(
+                        recover_custom_job(tid, is_group), 'date', run_date=run_time, 
+                        id=f"resume_custom_share_{tid}", replace_existing=True
+                    )
+                else:
+                    await self.db.update_state_dict(f"target_{tid}", {"pending_delay_job": None})
 
     def setup_cron(self, cron_str):
         """设置自动分享触发器 (支持 cron 和 random_period)"""
@@ -435,18 +578,49 @@ class TaskManager:
             TimePeriod.LATE_NIGHT: "22:00-24:00"
         }.get(period, "")
 
-    async def decide_type_with_state(self, current_period: TimePeriod, is_qzone: bool = False) -> SharingType:
-        # 区分配置和数据库存储键
-        conf_node = self.qzone_conf if is_qzone else self.basic_conf
-        type_key = "qzone_sharing_type" if is_qzone else "sharing_type"
-        state_key = "qzone" if is_qzone else "global"
-        
-        conf_type = conf_node.get(type_key, "auto")
-        if conf_type != "auto":
-            try: return SharingType(conf_type)
-            except: pass
-        
+    async def decide_type_with_state(self, current_period: TimePeriod, is_qzone: bool = False, target_id: str = None, specific_type: str = "auto") -> SharingType:
+        """带目标ID状态的分享类型决定，支持自定义列表轮换"""
+        # 获取状态存储的 Key。QQ空间用 "qzone"；普通会话根据 ID 存储独立状态
+        if is_qzone:
+            state_key = "qzone"
+        else:
+            state_key = f"target_{target_id}" if target_id else "global"
+            
         state = await self.db.get_state(state_key, {})
+
+        # 处理用户填写的逗号自定义序列
+        if specific_type and specific_type.lower() != "auto":
+            # 兼容中英文字符
+            seq_str = specific_type.replace("，", ",")
+            custom_seq = [s.strip().lower() for s in seq_str.split(",") if s.strip()]
+            
+            # 如果解析出来的列表不仅仅只有一个 "auto"
+            if custom_seq and custom_seq != ["auto"]:
+                idx_key = "custom_sequence_index"
+                idx = state.get(idx_key, 0)
+                if idx >= len(custom_seq): idx = 0
+                
+                selected_str = custom_seq[idx]
+                next_idx = (idx + 1) % len(custom_seq)
+                
+                # 保存这个群专属的序列进度
+                await self.db.update_state_dict(state_key, {
+                    idx_key: next_idx, 
+                    "last_timestamp": datetime.now().isoformat()
+                })
+                
+                # 如果当前轮到的单词不是 auto，直接返回该类型
+                if selected_str != "auto":
+                    try: 
+                        return SharingType(selected_str)
+                    except ValueError:
+                        pass # 如果用户拼写错误导致无法识别，忽略并进入下方兜底
+                
+                # 如果轮到的单词刚好是 "auto"，系统会直接无视上面的返回，
+                # 顺滑地进入下方的“按当前时间段智能选择”代码块！
+
+        # 原有的按时间段智能判断序列（兜底与 Auto 专用）
+        conf_node = self.qzone_conf if is_qzone else self.basic_conf
         
         # 映射序列前缀
         prefix = "qzone_" if is_qzone else ""
@@ -485,8 +659,34 @@ class TaskManager:
         try: return SharingType(selected)
         except: return SharingType.GREETING
 
-    def get_broadcast_targets(self):
-        """辅助方法：获取需要广播的目标列表"""
+    def _parse_targets_config(self, conf_list):
+        """核心解析器：支持 群号:Cron时间:类型 这种三段式复杂写法"""
+        if isinstance(conf_list, dict): return conf_list
+        res = {}
+        if isinstance(conf_list, list):
+            for item in conf_list:
+                s = str(item).strip()
+                if not s: continue
+                # 支持中英文冒号混用
+                s = s.replace("：", ":")
+                parts = [p.strip() for p in s.split(":")]
+                
+                target_id = parts[0]
+                if len(parts) == 1:
+                    # 只有群号
+                    res[target_id] = {"cron": None, "seq": "auto"}
+                elif len(parts) == 2:
+                    # 只有群号和类型 (例如 123456:news)
+                    res[target_id] = {"cron": None, "seq": parts[1]}
+                elif len(parts) >= 3:
+                    # 群号 : 时间 : 类型 (例如 123456:0 7 * * *:news)
+                    cron_str = ":".join(parts[1:-1]).strip()
+                    seq_str = parts[-1].strip()
+                    res[target_id] = {"cron": cron_str, "seq": seq_str}
+        return res
+
+    def get_broadcast_targets(self, exclude_custom_cron=False):
+        """辅助方法：获取需要广播的目标列表。exclude_custom_cron 启用时会跳过有独立时间的群"""
         targets = []
         default_adapter_id = self.plugin._cached_adapter_id
         
@@ -510,17 +710,21 @@ class TaskManager:
              logger.warning("[DailySharing] 尚未缓存 Adapter ID，使用默认值 'aiocqhttp'。")
 
         if default_adapter_id:
-            # 健壮性检查
-            r_groups = self.receiver_conf.get("groups")
-            if not isinstance(r_groups, list): r_groups = []
-            
-            r_users = self.receiver_conf.get("users")
-            if not isinstance(r_users, list): r_users = []
+            # 解析配置为字典（支持冒号写法）
+            r_groups = self._parse_targets_config(self.receiver_conf.get("groups", []))
+            r_users = self._parse_targets_config(self.receiver_conf.get("users", []))
 
-            for gid in r_groups:
-                if gid: targets.append(f"{default_adapter_id}:GroupMessage:{gid}")
-            for uid in r_users:
-                if uid: targets.append(f"{default_adapter_id}:FriendMessage:{uid}")
+            for gid, conf in r_groups.items():
+                if gid:
+                    # 如果全局广播开启了排除，且这个群有独立闹钟，跳过它！
+                    if exclude_custom_cron and isinstance(conf, dict) and conf.get("cron"):
+                        continue
+                    targets.append(f"{default_adapter_id}:GroupMessage:{gid}")
+            for uid, conf in r_users.items():
+                if uid:
+                    if exclude_custom_cron and isinstance(conf, dict) and conf.get("cron"):
+                        continue
+                    targets.append(f"{default_adapter_id}:FriendMessage:{uid}")
         
         return targets
 
@@ -628,11 +832,6 @@ class TaskManager:
             is_news = (target_type_enum == SharingType.NEWS)
             
             # 触发静态图发送的条件：
-            # 1. 是新闻
-            # 2. 需要获取图片 (get_image=True)
-            # 3. 不需要AI配图 (not need_image)
-            # 4. 不需要语音 (not need_voice) -> 如果需要语音，必须走 LLM 生成文本
-            # 5. 不需要视频 (not need_video) -> 如果需要视频，必须走 后续流程
             if is_news and get_image and not need_image and not need_voice and not need_video:
                 try:
                     img_url = None
@@ -674,9 +873,6 @@ class TaskManager:
                 return
 
             # 场景 B: 标准 LLM 生成流程
-            # 1. 纯文字模式 (问候/心情/知识/推荐/新闻文字版)
-            # 2. 高级模式 (任何类型 + need_image=True)
-            # 3. 语音模式 (任何类型 + need_voice=True)
             
             # 获取上下文 ID
             uid = event.get_sender_id()
@@ -701,8 +897,7 @@ class TaskManager:
                     news_src_key = self.news_service.select_news_source()
                 news_data = await self.news_service.get_hot_news(news_src_key)
                 
-                # 如果在主流程中(因为要语音等原因进来了)，且用户依然默认想要看热搜图
-                # 并且配置允许带上新闻图
+                # 如果在主流程中且配置允许带上新闻图
                 if get_image and not need_image and self.image_conf.get("attach_hot_news_image", True):
                     try:
                         img_path, _ = self.news_service.get_hot_news_image_url(news_src_key)
@@ -742,11 +937,10 @@ class TaskManager:
                 await event.send(event.plain_result("内容生成失败，请稍后再试。"))
                 return
             
-            # ================= 视觉生成逻辑 (LLM 触发：严格手动控制) =================
+            # ================= 视觉生成逻辑 =================
             video_url = None
-            
             should_gen_visual = False
-            # 只有当用户明确要求配图或视频时，才生成
+            
             if self.image_conf.get("enable_ai_image", False):
                 if need_image or need_video:
                     should_gen_visual = True
@@ -762,11 +956,10 @@ class TaskManager:
                     if need_video:
                         video_url = await self.image_service.generate_video_from_image(img_path, content)
 
-            # ================= 语音生成逻辑 (LLM 触发：严格手动控制) =================
+            # ================= 语音生成逻辑 =================
             audio_path = None
             if self.tts_conf.get("enable_tts", False):
                 should_gen_voice = False
-                # 只有当用户明确要求语音时，才生成
                 if need_voice:
                     should_gen_voice = True
                         
@@ -781,7 +974,6 @@ class TaskManager:
             await self.ctx_service.record_bot_reply_to_history(target_umo, content, image_desc=img_desc)
             await self.ctx_service.record_to_memos(target_umo, content, img_desc)
                 
-
         except Exception as e:
             logger.error(f"[DailySharing] 异步任务错误: {e}")
             import traceback
@@ -817,7 +1009,6 @@ class TaskManager:
             return
 
         # 定时早报自动同步到QQ空间
-        # 仅在自动定时任务触发时且开关打开时执行
         if specific_target is None and self.extra_shares_conf.get("sync_briefing_to_qzone", False):
             qzone_plugin = self.ctx_service._find_plugin("qzone")
             if qzone_plugin and hasattr(qzone_plugin, "service"):
@@ -865,35 +1056,11 @@ class TaskManager:
                 logger.error(f"[DailySharing] 分享早报到 {uid} 失败: {e}")
 
     async def execute_share(self, force_type: SharingType = None, news_source: str = None, specific_target: str = None):
-        """执行分享的主流程"""
+        """执行分享的主流程（支持群聊私聊独立配置与记忆序列）"""
         if self.plugin._is_terminated: return
 
         period = self.get_curr_period()
-        if force_type:
-            stype = force_type
-        else:
-            stype = await self.decide_type_with_state(period) 
-        
-        logger.info(f"[DailySharing] 时段: {period.value}, 类型: {stype.value}")
-
         life_ctx = await self.ctx_service.get_life_context()
-        news_data = None
-        
-        # 加载状态以获取上次的新闻源
-        state = await self.db.get_state("global", {})
-        last_news_source = state.get("last_news_source")
-
-        if stype == SharingType.NEWS:
-            # 如果没有指定源（自动选择模式），则传入 last_news_source 进行去重
-            if not news_source:
-                news_source = self.news_service.select_news_source(excluded_source=last_news_source)
-            
-            news_data = await self.news_service.get_hot_news(news_source)
-            
-            # 如果获取成功，更新状态中的 last_news_source
-            if news_data:
-                actual_source = news_data[1]
-                await self.db.update_state_dict("global", {"last_news_source": actual_source})
 
         targets = []
         
@@ -901,22 +1068,60 @@ class TaskManager:
         if specific_target:
             targets.append(specific_target)
         else:
-            targets = self.get_broadcast_targets()
+            # 如果是被全局大定时器唤醒，排除掉那些配置了独立闹钟的群，绝不打扰它们
+            targets = self.get_broadcast_targets(exclude_custom_cron=True)
 
         if not targets:
             logger.warning("[DailySharing] 未配置接收对象，且未指定目标，请在配置页填写群号或QQ号")
             return
+
+        # 加载并解析带冒号的独立配置
+        r_groups = self._parse_targets_config(self.receiver_conf.get("groups", []))
+        r_users = self._parse_targets_config(self.receiver_conf.get("users", []))
 
         for uid in targets:
             if self.plugin._is_terminated: break
             try:
                 is_group = "group" in uid.lower() or "room" in uid.lower() or "guild" in uid.lower()
                 
+                # 提取纯数字ID用于读取字典配置
+                adapter_id, real_id = self.ctx_service._parse_umo(uid)
+                
+                # 读取该群聊、私聊专属的类型策略配置（默认 fallback 为 global 设定的 sharing_type）
+                target_specific_type = self.basic_conf.get("sharing_type", "auto")
+                if is_group and real_id in r_groups:
+                    conf = r_groups[real_id]
+                    target_specific_type = conf.get("seq", "auto") if isinstance(conf, dict) else conf
+                elif not is_group and real_id in r_users:
+                    conf = r_users[real_id]
+                    target_specific_type = conf.get("seq", "auto") if isinstance(conf, dict) else conf
+
+                # 为该目标决定当前的分享类型
+                if force_type:
+                    stype = force_type
+                else:
+                    stype = await self.decide_type_with_state(period, is_qzone=False, target_id=uid, specific_type=target_specific_type)
+
+                logger.info(f"[DailySharing] 正在为 {uid} 生成内容... 时段: {period.value}, 类型: {stype.value}")
+                
+                # 独立获取该目标的新闻数据与去重
+                news_data = None
+                if stype == SharingType.NEWS:
+                    state = await self.db.get_state(f"target_{uid}", {})
+                    last_news_source = state.get("last_news_source")
+                    
+                    current_news_source = news_source
+                    if not current_news_source:
+                        current_news_source = self.news_service.select_news_source(excluded_source=last_news_source)
+                        
+                    news_data = await self.news_service.get_hot_news(current_news_source)
+                    if news_data:
+                        await self.db.update_state_dict(f"target_{uid}", {"last_news_source": news_data[1]})
+
                 # 尝试获取用户昵称 (仅限私聊) 
                 nickname = ""
                 if not is_group:
                     try:
-                        adapter_id, real_id = self.ctx_service._parse_umo(uid)
                         if adapter_id and real_id:
                             bot = self.ctx_service._get_bot_instance(adapter_id)
                             if bot:
@@ -950,7 +1155,6 @@ class TaskManager:
                             lines.append(f"- [{h.get('type')}] {clean_content}")
                         recent_dynamics_str = "\n".join(lines)
 
-                logger.info(f"[DailySharing] 正在为 {uid} 生成内容...")
                 content = await self.content_service.generate(
                     stype, period, uid, is_group, life_prompt, hist_prompt, news_data, nickname=nickname, recent_dynamics=recent_dynamics_str
                 )
@@ -976,8 +1180,8 @@ class TaskManager:
                 # 【新闻类型特殊处理】如果未开启AI配图或当前类型不允许AI配图，但这是新闻，且配置允许附带热搜图，尝试把热搜图带上
                 if stype == SharingType.NEWS and self.image_conf.get("attach_hot_news_image", True):
                     try:
-                        # 如果没有指定源（自动选择模式），复用 state 中的 last_news_source，或者重新获取 current news source
-                        state = await self.db.get_state("global", {})
+                        # 查找独立目标对应的上一个新闻源
+                        state = await self.db.get_state(f"target_{uid}", {})
                         last_source = state.get("last_news_source")
                         if last_source:
                             img_path, _ = self.news_service.get_hot_news_image_url(last_source)
@@ -1013,7 +1217,6 @@ class TaskManager:
 
                 # 分享内容
                 await self.send(uid, content, img_path, audio_path, video_url)
-                
                 
                 # 获取图片描述并写入 AstrBot 聊天上下文
                 img_desc = self.image_service.get_last_description()
@@ -1282,4 +1485,3 @@ class TaskManager:
                 await asyncio.sleep(float(delay_str))
         except:
             await asyncio.sleep(1.5)
-            

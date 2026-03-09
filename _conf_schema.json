@@ -8,28 +8,28 @@
   },
   "receiver": {
     "title": "推送目标设置",
-    "description": "配置自动发送的目标（QQ号/群号）",
+    "description": "配置自动发送的目标及专属配置",
     "type": "object",
     "items": {
       "groups": {
-        "title": "群聊列表",
+        "title": "群聊独立配置",
         "type": "list",
         "items": {
           "type": "string"
         },
         "description": "推送到群聊",
-        "hint": "点击“添加更多”输入群号。",
-        "default": []
+        "default": [],
+        "hint": "多种格式：1. 仅群号 = 跟随全局定时分享默认序列 2. 群号:类型 = 跟随全局定时器，仅分享指定类型 3. 群号:定时:类型 = 完全独立，脱离全局。请填入英文：greeting(问候), news(新闻), mood(心情), knowledge(知识), recommendation(推荐)。例如: 123456:0 7 * * *:news,mood 、 123456:morning:auto,mood 、 123456:mood,knowledge"
       },
       "users": {
-        "title": "私聊列表",
+        "title": "私聊独立配置",
         "type": "list",
         "items": {
           "type": "string"
         },
         "description": "推送到私聊",
-          "hint": "点击“添加更多”输入QQ号。",        
-        "default": []
+        "default": [],
+        "hint": "多种格式：1. 仅Q号 = 跟随全局定时分享默认序列 2. Q号:类型 = 跟随全局定时器，仅分享指定类型 3. Q号:定时:类型 = 完全独立，脱离全局。请填入英文：greeting(问候), news(新闻), mood(心情), knowledge(知识), recommendation(推荐)。例如: 123456:0 7 * * *:news,mood 、 123456:morning:auto,mood 、 123456:mood,knowledge"
       }
     }
   },
@@ -147,10 +147,10 @@
         "default": 0,
         "slider": {
             "min": 0,
-            "max": 30,
+            "max": 60,
             "step": 1
         },
-        "hint": "仅在 cron 模式下生效，定时触发后，随机等待 0 到 30 分钟再发送。例如 8:00 触发后，实际发送时间在 8:00-8:30 之间随机。设为 0 表示准点发送。"
+        "hint": "仅在 cron 模式下生效。定时触发后，随机等待 0 到 60 分钟再发送 (对配置了专属时间的独立群/私聊同样生效)。例如 8:00 触发后，实际发送时间在 8:00-9:00 之间随机。设为 0 表示准点发送。"
       },
       "data_retention_days": {
         "description": "内容去重保留天数",
@@ -164,7 +164,7 @@
         "hint": "用于【知识】和【推荐】类型。记住最近N天内分享过的主题，避免重复分享相同的内容。同时早于此天数的日志也会被自动清理。"
       },
       "sharing_type": {
-        "description": "群聊、私聊分享类型模式",
+        "description": "全局默认分享类型",
         "type": "string",
         "default": "auto",
         "options": ["auto", "greeting", "news", "mood", "knowledge", "recommendation"],
@@ -396,7 +396,7 @@
         "description": "分享新闻条",
         "type": "string",
         "default": "1-2",
-        "hint": "实际分享的新闻条数，可以是固定值(如'2')或范围(如：2-3)。最终会从获取的新闻中随机选择，避免每次都一样"
+        "hint": "实际分享的新闻条数，可以是固定值(如'2')或范围(如：2-3)。最终会从获取新闻中随机选择，避免每次都一样"
       },
       "news_api_timeout": {
         "description": "API超时(秒)",
