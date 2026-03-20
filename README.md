@@ -13,9 +13,6 @@
 
 无论是清晨带着阳光的一句早安语音、午后摸鱼时的一张热搜长图、深夜网抑云时的一段走心视频，还是自动分享到QQ空间的日常说说……Bot都能完美胜任。
 
-## 更新日志
-
-* 请点击查看 [**CHANGELOG.md**](https://github.com/siciyuanweilai/astrbot_plugin_daily_sharing/blob/main/CHANGELOG.md)
 
 ## 🌟 核心特性 
 
