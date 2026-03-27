@@ -6,4 +6,3 @@ author: 四次元未来
 repo: https://github.com/siciyuanweilai/astrbot_plugin_daily_sharing
 support_platforms:
     - aiocqhttp
-astrbot_version: ">=4.20"
