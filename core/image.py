@@ -86,7 +86,7 @@ class ImageService:
             time_hint = "深夜的幽暗氛围，漆黑的环境，城市夜景，昏暗的室内人造光，宁静的氛围"
 
         # 2. 穿搭提示
-        outfit_hint = "当前是休息时间，忽略白天外出服装，仅提取睡衣或家居服。" if is_night else "当前是活动时间，提取完整的外出日常穿搭。"
+        outfit_hint = "当前是休息时间，忽略白天外出服装，仅提取睡衣或家居服。" if is_night else "当前是活动时间，提取完整的穿搭，必须要保留原本完整的风格作为开头。"
 
         # 3. 动态构建地点逻辑 Prompt
         # 读取配置，默认为 True (文案主导)
@@ -124,7 +124,7 @@ class ImageService:
 2. **环境 (environment)**：根据逻辑确定的具体地点。
 3. **光影 (lighting)**：参考时间段[{time_hint}]。如果是室内，强调人造光；如果是室外，强调自然天气氛围。
 4. **穿搭 (outfit)**：{outfit_hint} 请明确区分"内搭"和"外穿"层次。
-5. **动作 (action)**：人物动作。
+5. **动作 (action)**：人物动作，必须只能是单人动作。
 
 请严格输出 JSON 格式：
 {{
@@ -459,7 +459,8 @@ class ImageService:
 
             # ================= 普通文生图逻辑 =================
             if hasattr(self._aiimg_plugin, "draw"):
-                target_size = self._aiimg_plugin.config.get("size", "1024x1024")
+                logger.debug(prompt)
+                target_size = self._aiimg_plugin.config.get("size", "1360x2048")
                 path_obj = await self._aiimg_plugin.draw.generate(prompt=prompt, size=target_size)
                 return str(path_obj)
             else:
